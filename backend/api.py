@@ -117,7 +117,7 @@ base_patient = np.array([
 
 
 def simulation_loop():
-    """Background thread: generates vitals every 1 second."""
+    """Background thread: generates vitals every 2 seconds."""
     global history
     while True:
         try:
@@ -151,14 +151,36 @@ def simulation_loop():
                     features = patient.reshape(1, -1)
                     classical_risk = float(rf.predict_proba(features)[0][1]) * 100
                 except Exception:
-                    # Dimension mismatch or other error - use heuristic
                     classical_risk = _heuristic_classical_risk(patient)
             else:
                 classical_risk = _heuristic_classical_risk(patient)
 
+            qml_risk = qml_result.get("risk_score", 50.0)
+
+            # ── FORMAT TICK TO MATCH FRONTEND EXPECTATIONS ──
             tick = {
                 "timestamp": time.time(),
                 "is_anomaly_injected": vitals_data.get("is_anomaly_injected", False),
+                # Frontend expects these exact keys:
+                "classical_vitals": {
+                    "heart_rate": round(patient[0], 1),
+                    "spo2": round(patient[1], 1),
+                    "resp_rate": round(patient[2], 1),
+                    "temperature": round(patient[3], 2),
+                    "wbc_count": round(patient[4], 1),
+                },
+                "risk": {
+                    "qml": round(qml_risk, 1),
+                    "classical": round(classical_risk, 1),
+                },
+                "qml_correlations": {
+                    "hr_temp_sync": round(qml_result.get("von_neumann_entropy", 0.85), 4),
+                    "spo2_wbc_coupling": round(qml_result.get("tb_probability", 0.72), 4),
+                    "entanglement_entropy": round(qml_result.get("von_neumann_entropy", 0.65), 4),
+                },
+                "drift_alert": vitals_data.get("is_anomaly_injected", False),
+                "advisory": qml_result.get("severity", "NORMAL"),
+                # Keep raw data too for analyze-patient endpoint
                 "vitals": vitals,
                 "qml_analysis": qml_result,
                 "classical_risk": round(classical_risk, 1),
@@ -170,9 +192,27 @@ def simulation_loop():
 
         except Exception as e:
             print(f"[Sim] Loop error: {e}")
+            traceback.print_exc()
 
-        time.sleep(1)
+        time.sleep(2)  # Every 2 seconds to save RAM on Render free tier
 
+
+def keep_alive_loop():
+    """Ping self every 10 minutes to prevent Render free tier from sleeping."""
+    import urllib.request
+    render_url = os.environ.get("RENDER_EXTERNAL_URL", "")
+    if not render_url:
+        print("[KeepAlive] No RENDER_EXTERNAL_URL found, skipping keep-alive")
+        return
+    health_url = f"{render_url}/api/health"
+    print(f"[KeepAlive] Will ping {health_url} every 10 minutes")
+    while True:
+        time.sleep(600)  # 10 minutes
+        try:
+            urllib.request.urlopen(health_url, timeout=10)
+            print(f"[KeepAlive] Pinged {health_url} OK")
+        except Exception as e:
+            print(f"[KeepAlive] Ping failed: {e}")
 
 def _fallback_qml(patient):
     """Fallback QML results when engine is not available."""
@@ -205,9 +245,6 @@ def _heuristic_classical_risk(patient):
     return round(risk, 1)
 
 
-# Start simulation thread
-sim_thread = threading.Thread(target=simulation_loop, daemon=True)
-sim_thread.start()
 
 
 # ── Live Endpoints ───────────────────────────────────────────────────────────
@@ -523,6 +560,9 @@ def startup_event():
     print("[API] Starting background simulation thread...")
     t = threading.Thread(target=simulation_loop, daemon=True)
     t.start()
+    # Keep-alive thread to prevent Render free tier from sleeping
+    ka = threading.Thread(target=keep_alive_loop, daemon=True)
+    ka.start()
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
