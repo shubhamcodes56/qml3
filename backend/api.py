@@ -480,7 +480,7 @@ Output ONLY a raw JSON object with no markdown formatting. It must contain these
         import io
         img = Image.open(io.BytesIO(image_bytes))
 
-        model = genai.GenerativeModel("gemini-1.5-flash")
+        model = genai.GenerativeModel("gemini-2.5-flash-lite")
         response = model.generate_content([prompt, img])
         
         # Parse JSON output
@@ -516,6 +516,13 @@ async def health():
         "simulation_ticks": len(history),
     }
 
+# ── Startup Event ────────────────────────────────────────────────────────────
+
+@app.on_event("startup")
+def startup_event():
+    print("[API] Starting background simulation thread...")
+    t = threading.Thread(target=simulation_loop, daemon=True)
+    t.start()
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
