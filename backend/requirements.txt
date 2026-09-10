@@ -1,0 +1,14 @@
+pennylane
+torch
+torchvision
+fastapi
+uvicorn[standard]
+opencv-python-headless
+google-generativeai
+pillow
+scikit-learn
+joblib
+numpy
+pydantic
+python-dotenv
+python-multipart
